@@ -63,6 +63,7 @@ export const jobs: RedshiftImportPlugin['jobs'] = {
 
 export const setupPlugin: RedshiftImportPlugin['setupPlugin'] = async ({ config, cache, jobs, global, storage }) => {
     const requiredConfigOptions = ['clusterHost', 'clusterPort', 'dbName', 'dbUsername', 'dbPassword']
+    console.log(`Config ${config}`)
     for (const option of requiredConfigOptions) {
         if (!(option in config)) {
             throw new Error(`Required config option ${option} is missing!`)
@@ -132,6 +133,8 @@ const executeQuery = async (
     values: any[],
     config: PluginMeta<RedshiftImportPlugin>['config']
 ): Promise<ExecuteQueryResponse> => {
+    
+    console.log(`executeQuery ${config}`)
 
     const pgClient = new Client({
         user: config.dbUsername,
