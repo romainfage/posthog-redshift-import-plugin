@@ -134,7 +134,7 @@ const executeQuery = async (
     config: PluginMeta<RedshiftImportPlugin>['config']
 ): Promise<ExecuteQueryResponse> => {
     
-    console.log(`executeQuery ${config}`)
+    console.log(`executeQuery ${config.clusterHost}`)
 
     const pgClient = new Client({
         user: config.dbUsername,
