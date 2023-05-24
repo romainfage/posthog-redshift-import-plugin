@@ -1,5 +1,6 @@
 import { Plugin, PluginEvent, PluginMeta } from '@posthog/plugin-scaffold'
 import { Client, QueryResult, QueryResultRow } from 'pg'
+import { Redshift } from 'node-redshift'
 
 declare namespace posthog {
     function capture(event: string, properties?: Record<string, any>): void
@@ -63,43 +64,12 @@ export const jobs: RedshiftImportPlugin['jobs'] = {
 
 export const setupPlugin: RedshiftImportPlugin['setupPlugin'] = async ({ config, cache, jobs, global, storage }) => {
     const requiredConfigOptions = ['clusterHost', 'clusterPort', 'dbName', 'dbUsername', 'dbPassword']
-    console.log(`Config ${config}`)
     for (const option of requiredConfigOptions) {
         if (!(option in config)) {
             throw new Error(`Required config option ${option} is missing!`)
         }
     }
-
-    if (!config.clusterHost.endsWith('redshift.amazonaws.com')) {
-        throw new Error('Cluster host must be a valid AWS Redshift host')
-    }
-
-    // the way this is done means we'll continuously import as the table grows
-    // to only import historical data, we should set a totalRows value in storage once
-    const totalRowsResult = await executeQuery(
-        `SELECT COUNT(1) FROM ${sanitizeSqlIdentifier(config.tableName)}`,
-        [],
-        config
-    )
-
-    if (!totalRowsResult || totalRowsResult.error || !totalRowsResult.queryResult) {
-        throw new Error('Unable to connect to Redshift!')
-    }
-
-    global.totalRows = Number(totalRowsResult.queryResult.rows[0].count)
-
-    // if set to only import historical data, take a "snapshot" of the count
-    // on the first run and only import up to that point
-    if (config.importMechanism === 'Only import historical data') {
-        const totalRowsSnapshot = await storage.get('total_rows_snapshot', null)
-        if (!totalRowsSnapshot) {
-            await storage.set('total_rows_snapshot', Number(totalRowsResult.queryResult.rows[0].count))
-        } else {
-            global.totalRows = Number(totalRowsSnapshot)
-        }
-    } 
-
-    
+   
     // used for picking up where we left off after a restart
     const offset = await storage.get(REDIS_OFFSET_KEY, 0)
 
@@ -136,7 +106,7 @@ const executeQuery = async (
     
     console.log(`executeQuery ${config.clusterHost}`)
 
-    const pgClient = new Client({
+    const pgClient = new Redshift({
         user: config.dbUsername,
         password: config.dbPassword,
         host: config.clusterHost,
@@ -144,12 +114,11 @@ const executeQuery = async (
         port: parseInt(config.clusterPort),
     })
 
-    await pgClient.connect()
 
     let error: Error | null = null
     let queryResult: QueryResult<any> | null = null
     try {
-        queryResult = await pgClient.query(query, values)
+        queryResult = await pgClient.query(query)
     } catch (err) {
         error = err
     }
@@ -188,10 +157,9 @@ const importAndIngestEvents = async (
     }
 
     
-    const query = `SELECT * FROM ${sanitizeSqlIdentifier(
-        meta.config.tableName
+    const query = `SELECT * FROM tracking_events.global_tracking_posthog
     )} 
-    ORDER BY ${sanitizeSqlIdentifier( config.orderByColumn)}
+    ORDER BY created_at
     OFFSET $1 LIMIT ${EVENTS_PER_BATCH}`
 
     const values = [offset]
